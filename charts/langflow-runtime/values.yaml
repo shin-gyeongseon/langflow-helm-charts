@@ -53,8 +53,6 @@ env:
     value: "7860"
   - name: LANGFLOW_LOG_LEVEL
     value: "INFO"
-  - name: LANGFLOW_DATABASE_URL
-    value: "sqlite:////app/db/langflow.db"
   - name: LANGFLOW_ALEMBIC_LOG_FILE
     value: "/app/db/alembic.log"
   - name: LANGFLOW_UPDATE_STARTER_PROJECTS
@@ -64,6 +62,18 @@ env:
 #      secretKeyRef:
 #        name: langflow-secrets
 #        key: openai-key
+
+database:
+  url: "sqlite:////app/db/langflow.db"
+
+presyncJob:
+  enabled: false
+  runOnce: true
+  healthCheck:
+    url: "http://127.0.0.1:7860/health_check"
+    maxRetry: 60
+    sleepSec: 3
+    requireChatOk: false
 
 
 service:

@@ -60,3 +60,53 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Runtime database secret name
+*/}}
+{{- define "langflow-runtime.databaseSecretName" -}}
+{{- printf "%s-runtime-db" (include "langflow-runtime.fullname" .) -}}
+{{- end }}
+
+{{/*
+Runtime env shared by Deployment and PreSync Job
+*/}}
+{{- define "langflow-runtime.runtimeEnv" -}}
+- name: LANGFLOW_LOAD_FLOWS_PATH
+  value: {{ .Values.downloadFlows.path | quote }}
+- name: LANGFLOW_DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "langflow-runtime.databaseSecretName" . }}
+      key: database-url
+{{- range .Values.env }}
+{{- if and (ne .name "LANGFLOW_DATABASE_URL") (ne .name "LANGFLOW_LOAD_FLOWS_PATH") }}
+{{ toYaml (list .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Shared flow download script before starting Langflow runtime
+*/}}
+{{- define "langflow-runtime.downloadFlowsScript" -}}
+mkdir -p {{ .Values.downloadFlows.path }} &&
+{{- range .Values.downloadFlows.flows }}
+{{- $targetFile := printf "%s/%s.json" $.Values.downloadFlows.path (.uuid | default (.url | sha256sum | trunc 8)) -}}
+echo "Downloading flows from {{ .url }} to {{ $targetFile }}" &&
+curl --fail -o '{{ $targetFile }}' \
+  {{- if .basicAuth }}
+  -u "{{ .basicAuth }}" \
+  {{- end }}
+  {{- if .headers }}
+  {{- range $key, $value := .headers }}
+  -H "{{ $key }}: {{ $value }}" \
+  {{- end }}
+  {{- end }}
+  '{{ .url }}' &&
+{{- if .endpoint }}
+python -c 'import json, sys;f = sys.argv[1]; data = json.load(open(f));data["endpoint_name"]="{{ .endpoint }}";json.dump(data, open(f, "w"))' '{{ $targetFile }}' &&
+{{- end }}
+{{- end }}
+echo 'Flows downloaded'
+{{- end }}

@@ -1,0 +1,29 @@
+replicaCount: 2
+
+database:
+  url: "postgresql://langflow:langflow@langflow-postgres:5432/langflow"
+
+presyncJob:
+  enabled: true
+  runOnce: true
+  healthCheck:
+    url: "http://127.0.0.1:7860/health_check"
+    maxRetry: 60
+    sleepSec: 3
+    requireChatOk: false
+
+readinessProbe:
+  httpGet:
+    path: /health_check
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 12
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 20
+  failureThreshold: 6

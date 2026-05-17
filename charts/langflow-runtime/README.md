@@ -3,6 +3,105 @@
 Deploy Langflow flows to Kubernetes with this Helm chart.
 Using a dedicated deployment for a set of flows is fundamental in production environments in order to have a granular resource control.
 
+## PostgreSQL and PreSync initialization
+
+For multi-replica runtime deployments, this chart can initialize Langflow against the target database before the main Deployment starts.
+
+The chart now supports:
+
+```yaml
+database:
+  url: "postgresql://langflow:langflow@langflow-postgres:5432/langflow"
+
+presyncJob:
+  enabled: true
+  runOnce: true
+  healthCheck:
+    url: "http://127.0.0.1:7860/health_check"
+    maxRetry: 60
+    sleepSec: 3
+    requireChatOk: false
+```
+
+When `presyncJob.enabled=true`, the chart renders an Argo CD `PreSync` Job that:
+
+1. Uses the same runtime image and env configuration as the Deployment
+2. Starts Langflow once in the background
+3. Polls `http://127.0.0.1:7860/health_check` with Python `urllib.request`
+4. Exits `0` on DB-ready success, or `1` on timeout/failure
+
+The database URL is injected through a generated Secret and exposed to both the Job and Deployment through `LANGFLOW_DATABASE_URL`.
+
+Example manifests and values for the `langflow-test` namespace are available here:
+
+- `examples/langflow-runtime/langflow-test-postgres.yaml`
+- `examples/langflow-runtime/langflow-test-values-postgres.yaml`
+
+Apply the test PostgreSQL setup:
+
+```bash
+kubectl apply -f examples/langflow-runtime/langflow-test-postgres.yaml
+kubectl get namespace langflow-test
+kubectl get svc langflow-postgres -n langflow-test
+```
+
+Test PostgreSQL connectivity:
+
+```bash
+kubectl run pg-test \
+  -n langflow-test \
+  --image=postgres:16 \
+  --restart=Never \
+  --rm -it \
+  --env="PGPASSWORD=langflow" \
+  --command -- psql -h langflow-postgres -U langflow -d langflow -c "select 1;"
+```
+
+If the PVC already contains data, PostgreSQL image initialization does not recreate the configured DB/user automatically. In that case:
+
+```bash
+kubectl exec -it deploy/langflow-postgres -n langflow-test -- \
+  psql -U langflow -d postgres -c "CREATE DATABASE langflow_runtime;"
+
+kubectl exec -it deploy/langflow-postgres -n langflow-test -- \
+  psql -U langflow -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE langflow_runtime TO langflow;"
+
+kubectl exec -it deploy/langflow-postgres -n langflow-test -- \
+  psql -U langflow -d langflow -c "CREATE SCHEMA IF NOT EXISTS langflow AUTHORIZATION langflow;"
+```
+
+If you need a completely clean state for another test run:
+
+```bash
+kubectl delete deploy langflow-postgres -n langflow-test
+kubectl delete pvc langflow-postgres-pvc -n langflow-test
+```
+
+Validate rendered manifests locally:
+
+```bash
+helm template langflow-runtime ./charts/langflow-runtime \
+  -n langflow-test \
+  -f ./examples/langflow-runtime/langflow-test-values-postgres.yaml
+```
+
+Install or upgrade for chart validation:
+
+```bash
+helm upgrade --install langflow-runtime ./charts/langflow-runtime \
+  -n langflow-test \
+  -f ./examples/langflow-runtime/langflow-test-values-postgres.yaml
+```
+
+Inspect the result:
+
+```bash
+kubectl get secret,job,deploy,svc,pod -n langflow-test
+kubectl logs job/langflow-runtime-db-init -n langflow-test
+kubectl get pods -n langflow-test
+```
+
+`helm upgrade --install` is useful for chart validation, but Argo CD Sync is still required to validate real `PreSync` hook ordering.
 
 ## Import a flow
 

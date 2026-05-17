@@ -1,0 +1,133 @@
+{{- if .Values.presyncJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "langflow-runtime.fullname" . }}-db-init
+  labels:
+    {{- include "langflow-runtime.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-1"
+    {{- if not .Values.presyncJob.runOnce }}
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    {{- end }}
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        {{- include "langflow-runtime.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "langflow-runtime.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: runtime-db-init
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+
+              cat > /tmp/check-health.py <<'PY'
+              import json
+              import os
+              import sys
+              import time
+              import urllib.request
+
+              url = os.getenv("HEALTH_CHECK_URL", "http://127.0.0.1:7860/health_check")
+              max_retry = int(os.getenv("HEALTH_CHECK_MAX_RETRY", "60"))
+              sleep_sec = int(os.getenv("HEALTH_CHECK_SLEEP_SEC", "3"))
+              require_chat_ok = os.getenv("REQUIRE_CHAT_OK", "false").lower() == "true"
+
+              for attempt in range(1, max_retry + 1):
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as response:
+                          payload = json.loads(response.read().decode("utf-8"))
+                      db_ok = payload.get("db") == "ok"
+                      status_ok = payload.get("status") in (None, "ok")
+                      chat_ok = payload.get("chat") == "ok"
+
+                      if db_ok and status_ok and (chat_ok or not require_chat_ok):
+                          print(f"Langflow health_check passed: {payload}")
+                          sys.exit(0)
+
+                      print(f"Langflow not ready on attempt={attempt}: {payload}")
+                  except Exception as exc:
+                      print(f"Waiting for Langflow on attempt={attempt}: {exc}")
+
+                  time.sleep(sleep_sec)
+
+              print("Langflow health_check failed")
+              sys.exit(1)
+              PY
+
+              cleanup() {
+                if [ -n "${LANGFLOW_PID:-}" ]; then
+                  echo "Stopping Langflow process: ${LANGFLOW_PID}"
+                  kill "${LANGFLOW_PID}" 2>/dev/null || true
+                  wait "${LANGFLOW_PID}" 2>/dev/null || true
+                fi
+              }
+
+              trap cleanup EXIT
+
+              echo "Starting Langflow runtime for DB initialization check"
+              (
+                set -e
+                {{- include "langflow-runtime.downloadFlowsScript" . | nindent 16 }}
+                exec langflow run --backend-only --host 0.0.0.0 --port {{ .Values.service.port }}
+              ) &
+              LANGFLOW_PID=$!
+
+              echo "Langflow runtime started with PID=${LANGFLOW_PID}"
+              python /tmp/check-health.py
+          env:
+            {{- include "langflow-runtime.runtimeEnv" . | nindent 12 }}
+            - name: HEALTH_CHECK_URL
+              value: {{ .Values.presyncJob.healthCheck.url | quote }}
+            - name: HEALTH_CHECK_MAX_RETRY
+              value: {{ .Values.presyncJob.healthCheck.maxRetry | quote }}
+            - name: HEALTH_CHECK_SLEEP_SEC
+              value: {{ .Values.presyncJob.healthCheck.sleepSec | quote }}
+            - name: REQUIRE_CHAT_OK
+              value: {{ .Values.presyncJob.healthCheck.requireChatOk | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+          {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

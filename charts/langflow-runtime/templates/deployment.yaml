@@ -50,32 +50,12 @@ spec:
           {{- end }}
           command: ["/bin/bash", "-c"]
           args:
-            - >
-              set -e &&
-              mkdir -p {{ .Values.downloadFlows.path }} &&
-              {{- range .Values.downloadFlows.flows }}
-              {{- $targetFile := printf "%s/%s.json" $.Values.downloadFlows.path (.uuid | default (.url | sha256sum | trunc 8)) -}}
-              echo "Downloading flows from {{ .url }} to {{ $targetFile }}" &&
-              curl --fail -o '{{ $targetFile }}' \
-                {{- if .basicAuth }}
-                -u "{{ .basicAuth }}" \
-                {{- end }}
-                {{- if .headers }}
-                {{- range $key, $value := .headers }}
-                -H "{{ $key }}: {{ $value }}" \
-                {{- end }}
-                {{- end }}
-                '{{ .url }}' && 
-              {{- if .endpoint }}
-              python -c 'import json, sys;f = sys.argv[1]; data = json.load(open(f));data["endpoint_name"]="{{ .endpoint }}";json.dump(data, open(f, "w"))' '{{ $targetFile }}' &&
-              {{- end }}
-              {{- end }}
-              echo 'Flows downloaded' && 
-              langflow run --backend-only --host 0.0.0.0 --port {{ .Values.service.port }}
+            - |
+              set -e
+              {{- include "langflow-runtime.downloadFlowsScript" . | nindent 14 }}
+              exec langflow run --backend-only --host 0.0.0.0 --port {{ .Values.service.port }}
           env:
-            - name: LANGFLOW_LOAD_FLOWS_PATH
-              value: "{{ .Values.downloadFlows.path }}"
-            {{- toYaml .Values.env | nindent 12 }}
+            {{- include "langflow-runtime.runtimeEnv" . | nindent 12 }}
       {{- with .Values.volumes }}
       volumes:
         {{- toYaml . | nindent 8 }}
