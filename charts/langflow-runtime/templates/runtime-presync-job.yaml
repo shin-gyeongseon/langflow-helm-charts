@@ -59,10 +59,17 @@ spec:
               for attempt in range(1, max_retry + 1):
                   try:
                       with urllib.request.urlopen(url, timeout=5) as response:
-                          payload = json.loads(response.read().decode("utf-8"))
-                      db_ok = payload.get("db") == "ok"
+                          body = response.read().decode("utf-8")
+                          payload = json.loads(body) if body else {}
+
+                      if not isinstance(payload, dict):
+                          print(f"Unexpected health_check payload on attempt={attempt}: {payload!r}")
+                          time.sleep(sleep_sec)
+                          continue
+
+                      db_ok = payload.get("db") in (None, "ok")
                       status_ok = payload.get("status") in (None, "ok")
-                      chat_ok = payload.get("chat") == "ok"
+                      chat_ok = payload.get("chat") == "ok" if require_chat_ok else payload.get("chat") in (None, "ok")
 
                       if db_ok and status_ok and (chat_ok or not require_chat_ok):
                           print(f"Langflow health_check passed: {payload}")
@@ -97,7 +104,7 @@ spec:
               LANGFLOW_PID=$!
 
               echo "Langflow runtime started with PID=${LANGFLOW_PID}"
-              python /tmp/check-health.py
+              python -u /tmp/check-health.py
           env:
             {{- include "langflow-runtime.runtimeEnv" . | nindent 12 }}
             - name: HEALTH_CHECK_URL

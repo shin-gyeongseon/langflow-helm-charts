@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: "langflowai/langflow"
   pullPolicy: Always
-  tag: latest
+  tag: "1.9.2"
 
 downloadFlows:
   path: /app/flows

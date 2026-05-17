@@ -1,5 +1,8 @@
 replicaCount: 2
 
+image:
+  tag: "1.9.2"
+
 database:
   url: "postgresql://langflow:langflow@langflow-postgres:5432/langflow"
 

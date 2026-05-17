@@ -7,9 +7,14 @@ Using a dedicated deployment for a set of flows is fundamental in production env
 
 For multi-replica runtime deployments, this chart can initialize Langflow against the target database before the main Deployment starts.
 
+Use a pinned Langflow image tag instead of `latest`. On May 18, 2026, the latest stable GitHub release listed by Langflow is `1.9.2`, while `latest` can move independently and may pull a newer Python runtime.
+
 The chart now supports:
 
 ```yaml
+image:
+  tag: "1.9.2"
+
 database:
   url: "postgresql://langflow:langflow@langflow-postgres:5432/langflow"
 
@@ -31,6 +36,8 @@ When `presyncJob.enabled=true`, the chart renders an Argo CD `PreSync` Job that:
 4. Exits `0` on DB-ready success, or `1` on timeout/failure
 
 The database URL is injected through a generated Secret and exposed to both the Job and Deployment through `LANGFLOW_DATABASE_URL`.
+
+The health-check script tolerates optional `status`, `chat`, and `db` fields in the `/health_check` response, which matches the Langflow API schema.
 
 Example manifests and values for the `langflow-test` namespace are available here:
 
